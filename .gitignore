@@ -1,0 +1,28 @@
+# Secrets — NEVER commit
+.env
+
+# .NET
+bin/
+obj/
+*.user
+
+# Node / frontend
+**/node_modules/
+dist/
+frontend/.vite/
+
+# IDE
+.vs/
+.idea/
+*.swp
+
+# Claude Code local settings (machine-specific)
+.claude/settings.local.json
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Generated corpus — recreate with `node tools/seed-gdpr.mjs` (see README).
+# The GDPR article text belongs to its source (gdpr-info.eu); not redistributed here.
+docs-samples/gdpr/

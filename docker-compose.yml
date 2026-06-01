@@ -1,0 +1,91 @@
+# DocsRAG — fully local, free stack.
+# Services: Postgres+pgvector, Ollama (Llama/Qwen + embeddings), API and frontend.
+# Usage:  docker compose up --build
+# On the first run, the ollama-init service downloads the models (~3 GB).
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg17
+    container_name: docsrag-postgres
+    environment:
+      POSTGRES_USER: docsrag
+      POSTGRES_PASSWORD: docsrag
+      POSTGRES_DB: docsrag
+    ports:
+      - "5432:5432"
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U docsrag -d docsrag"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  ollama:
+    image: ollama/ollama:latest
+    container_name: docsrag-ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+
+  # Ephemeral container: waits for Ollama to come up and pulls the needed models.
+  # It exits when done; `api` only starts after this completes successfully.
+  ollama-init:
+    image: ollama/ollama:latest
+    container_name: docsrag-ollama-init
+    depends_on:
+      - ollama
+    environment:
+      - OLLAMA_HOST=ollama:11434
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        echo "Waiting for Ollama to respond..."
+        until ollama list >/dev/null 2>&1; do sleep 1; done
+        echo "Pulling embedding model (bge-m3, multilingual)..."
+        ollama pull bge-m3
+        echo "Pulling generation model (qwen2.5:3b)..."
+        ollama pull qwen2.5:3b
+        echo "Models ready."
+    restart: "no"
+
+  api:
+    build:
+      context: ./backend
+    container_name: docsrag-api
+    ports:
+      - "8000:8000"
+    environment:
+      - ASPNETCORE_URLS=http://+:8000
+      - ASPNETCORE_ENVIRONMENT=Development
+      - ConnectionStrings__Postgres=Host=postgres;Port=5432;Database=docsrag;Username=docsrag;Password=docsrag
+      - Ollama__Endpoint=http://ollama:11434
+      - Rag__DocsPath=/docs
+      # To use Claude in production: set Rag__Provider=anthropic and the key
+      # below (in .env). Defaults to "ollama" (local, free).
+      # - Rag__Provider=anthropic
+      - Anthropic__ApiKey=${ANTHROPIC_API_KEY:-}
+    volumes:
+      # Mount the documents for the API to index (read-only).
+      - ./docs-samples:/docs:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      ollama:
+        condition: service_started
+      ollama-init:
+        condition: service_completed_successfully
+
+  web:
+    build:
+      context: ./frontend
+    container_name: docsrag-web
+    ports:
+      - "8080:80"
+    depends_on:
+      - api
+
+volumes:
+  pg_data:
+  ollama_data:
